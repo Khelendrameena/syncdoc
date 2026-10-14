@@ -123,30 +123,24 @@ makes K random insert/delete edits concurrently. Measured: per-client join
 latency (join → init ack), server updates received / wall time, and
 time-to-converge (last edit → all clients' text identical).
 
-**Results**
-
-Smoke run (measured 2026-10-15, build machine, server + 30 clients on the
-same host over loopback — no network RTT, so treat as a ceiling; DB was the
-in-memory test double, not Postgres):
+**Results** (measured 2026-10-15, build machine, real PostgreSQL 16, server +
+clients on the same host over loopback — no network RTT, so treat latency
+as a ceiling):
 
 | Clients | Edits/client | Join p50/p95 | Server edits/s* | Time to converge |
 |---|---|---|---|---|
-| 30 | 40 (1,200 total) | 3 / 7 ms | 367/s | 112 ms |
+| 30 | 40 (1,200 total) | 3 / 8 ms | 511/s | 123 ms |
+| 50 | 40 (2,000 total) | 2 / 7 ms | 409/s | 157 ms |
 
 \* The edit loop paces clients with a 0–4 ms sleep between edits, so
-edits/s reflects client pacing, not the server ceiling. All 1,200 edits
-were received and every replica converged (final doc: 6,269 chars).
-
-**Your turn — run against real Postgres** and replace the table above:
+edits/s reflects client pacing, not the server ceiling. Every edit was
+received by the server and every replica converged (final docs: 6,184 and
+10,308 chars). Reproduce on your own hardware with:
 
 ```bash
 docker compose up --build -d          # or your local Postgres
 node server/scripts/load-test.js --url http://localhost:4000 --clients 50 --edits 40
 ```
-
-| Clients | Edits/client | Join p50/p95 | Server edits/s | Time to converge |
-|---|---|---|---|---|
-| [N] | [K] | [X] / [Y] ms | [Z]/s | [W] ms |
 
 Honest caveats: same-host loopback flatters latency; Postgres and Node
 share the machine; no TLS. Re-run on your own hardware before quoting —
