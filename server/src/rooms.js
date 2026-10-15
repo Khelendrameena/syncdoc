@@ -110,6 +110,11 @@ export class RoomManager {
   async handleUpdate(docId, updateB64, socket) {
     const room = this.rooms.get(docId);
     if (!room) return { error: 'not in room' };
+    // Validate BEFORE decoding: Buffer.from(non-string) throws, and a
+    // garbage update must be rejected, not crash the handler.
+    if (typeof updateB64 !== 'string' || updateB64.length === 0) {
+      return { error: 'malformed update' };
+    }
     let update;
     try {
       update = b64decode(updateB64);

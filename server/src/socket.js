@@ -43,8 +43,11 @@ export function attachSocket(io, store, rooms) {
       return doc.owner_id === user.sub;
     };
 
-    socket.on('doc:join', async ({ docId, stateVector, awarenessId }, ack = () => {}) => {
+    // Destructuring defaults: a client that emits with no payload (or a
+    // malformed one) must get an error, not crash the socket handler.
+    socket.on('doc:join', async ({ docId, stateVector, awarenessId } = {}, ack = () => {}) => {
       try {
+        if (typeof docId !== 'string' || !docId) return ack({ error: 'docId required' });
         const doc = await store.getDocument(docId);
         if (!doc) return ack({ error: 'document not found' });
         if (!canAccess(doc)) return ack({ error: 'forbidden' });
@@ -75,15 +78,18 @@ export function attachSocket(io, store, rooms) {
       }
     });
 
-    socket.on('doc:update', async ({ docId, update }) => {
-      if (!socket.data.docs.has(docId)) return; // must join first
-      await rooms.handleUpdate(docId, update, socket);
+    socket.on('doc:update', async ({ docId, update } = {}, ack = () => {}) => {
+      if (!socket.data.docs.has(docId)) return ack({ error: 'join first' });
+      // handleUpdate validates the payload and returns { error } on bad
+      // input; surface it on the ack so the sender can tell the user.
+      ack(await rooms.handleUpdate(docId, update, socket));
     });
 
     // Awareness (cursors/selections) is relayed opaquely; the server only
     // uses it to refresh the sender's presence heartbeat.
-    socket.on('awareness:update', ({ docId, update, awarenessId }) => {
+    socket.on('awareness:update', ({ docId, update, awarenessId } = {}) => {
       if (!socket.data.docs.has(docId)) return;
+      if (typeof update !== 'string' || !update) return; // junk, not a crash
       rooms.heartbeat(docId, socket.id);
       socket.to(`doc:${docId}`).emit('awareness:update', {
         socketId: socket.id,
@@ -92,7 +98,7 @@ export function attachSocket(io, store, rooms) {
       });
     });
 
-    socket.on('doc:leave', ({ docId }) => {
+    socket.on('doc:leave', ({ docId } = {}) => {
       if (!socket.data.docs.has(docId)) return;
       socket.data.docs.delete(docId);
       rooms.leaveRoom(docId, socket);
