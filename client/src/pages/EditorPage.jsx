@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { Collaboration } from '@tiptap/extension-collaboration';
@@ -7,14 +7,18 @@ import { CollaborationCursor } from '@tiptap/extension-collaboration-cursor';
 import { useAuth } from '../auth.jsx';
 import { useCollabDoc } from '../collab.js';
 import { api } from '../api.js';
+import { StatusPill, ConnectionBanner } from '../components.jsx';
 
-const STATUS = {
-  connecting: ['bg-slate-400', 'Connecting…'],
-  syncing: ['bg-amber-400', 'Syncing…'],
-  online: ['bg-emerald-500', 'Online'],
-  offline: ['bg-red-500', 'Offline — edits are buffered'],
-  error: ['bg-red-600', 'Error'],
-};
+// Relative timestamp ("2 min ago"), absolute on hover via title attribute.
+function timeAgo(iso) {
+  const s = Math.max(1, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
 
 function PresenceAvatars({ collaborators }) {
   return (
@@ -39,6 +43,7 @@ function HistoryPanel({ docId, token, onClose }) {
   const [snaps, setSnaps] = useState([]);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   const load = async () => {
@@ -47,6 +52,8 @@ function HistoryPanel({ docId, token, onClose }) {
       setSnaps(snapshots);
     } catch (err) {
       setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
   useEffect(() => { load(); }, []);
@@ -92,20 +99,26 @@ function HistoryPanel({ docId, token, onClose }) {
         </button>
       </div>
       {error && <p className="text-red-600 text-sm mb-2">{error}</p>}
+      {loading ? (
+        <p className="text-sm text-slate-500 py-6 text-center animate-pulse">Loading history…</p>
+      ) : (
       <div className="space-y-2">
         {[...snaps].reverse().map((s) => (
-          <div key={s.id} className="border border-slate-200 rounded-lg p-2 text-sm">
+          <div key={s.id} className="border border-slate-200 rounded-lg p-2.5 text-sm hover:border-indigo-200 transition-colors">
             <div className="flex items-center justify-between">
-              <span className="font-medium">v{s.version}</span>
+              <span className="font-medium text-slate-800">v{s.version}</span>
               <button onClick={() => rollback(s)} disabled={busy}
-                className="text-indigo-600 hover:underline text-xs disabled:opacity-50">Restore</button>
+                className="text-indigo-600 hover:text-indigo-800 hover:underline text-xs font-medium disabled:opacity-50">Restore</button>
             </div>
-            <p className="text-slate-600 truncate">{s.note || '—'}</p>
-            <p className="text-xs text-slate-400">{new Date(s.created_at).toLocaleString()} · {s.created_by_name}</p>
+            <p className="text-slate-600 truncate mt-0.5" title={s.note || ''}>{s.note || '—'}</p>
+            <p className="text-xs text-slate-400 mt-0.5" title={new Date(s.created_at).toLocaleString()}>
+              {timeAgo(s.created_at)} · {s.created_by_name}
+            </p>
           </div>
         ))}
-        {snaps.length === 0 && <p className="text-sm text-slate-500">No snapshots yet.</p>}
+        {snaps.length === 0 && <p className="text-sm text-slate-500 py-4 text-center">No snapshots yet — save one to start version history.</p>}
       </div>
+      )}
     </div>
   );
 }
@@ -124,6 +137,10 @@ export default function EditorPage() {
       .then(({ document }) => setTitle(document.title))
       .catch(() => setTitle('Untitled'));
   }, [docId, token]);
+
+  // Share-link copy feedback ("Copied ✓") that resets after 2s.
+  const [copied, setCopied] = useState(false);
+  const [shareError, setShareError] = useState(null);
 
   const editor = useEditor(
     {
@@ -152,25 +169,43 @@ export default function EditorPage() {
     [ydoc, awareness] // recreate on rollback (new Y.Doc session)
   );
 
-  const [dot, label] = STATUS[status] || STATUS.connecting;
 
   const makeShareLink = async () => {
-    const { url } = await api(`/api/documents/${docId}/share`, { method: 'POST', token, body: {} });
-    setShareUrl(url);
+    setShareError(null);
+    try {
+      const { url } = await api(`/api/documents/${docId}/share`, { method: 'POST', token, body: {} });
+      setShareUrl(url);
+      setCopied(false);
+    } catch (err) {
+      setShareError(err.message);
+    }
+  };
+
+  const copyShareUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setShareError('Couldn’t copy — select the link manually.');
+    }
   };
 
   if (joinError) {
-    return <div className="bg-white border border-red-200 rounded-xl p-6 text-red-700">Couldn’t open document: {joinError}</div>;
+    return (
+      <div className="bg-white border border-red-200 rounded-xl p-6">
+        <p className="text-red-700 font-medium">Couldn’t open document: {joinError}</p>
+        <Link to="/" className="inline-block mt-3 text-sm text-indigo-600 hover:underline">← Back to documents</Link>
+      </div>
+    );
   }
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <h1 className="text-xl font-bold text-slate-800">{title}</h1>
+        <h1 className="text-xl font-bold text-slate-800">{title || 'Loading…'}</h1>
         <div className="flex items-center gap-3">
-          <span className="inline-flex items-center gap-1.5 text-sm text-slate-600">
-            <span className={`w-2.5 h-2.5 rounded-full ${dot}`} /> {label}
-          </span>
+          <StatusPill status={status} />
           <PresenceAvatars collaborators={collaborators} />
           <button onClick={makeShareLink} className="text-sm bg-white border border-slate-300 rounded-lg px-3 py-1.5 hover:border-indigo-400">Share</button>
           <button onClick={() => setShowHistory((s) => !s)} className="text-sm bg-white border border-slate-300 rounded-lg px-3 py-1.5 hover:border-indigo-400">
@@ -179,13 +214,19 @@ export default function EditorPage() {
         </div>
       </div>
 
+      {shareError && <p className="text-red-600 text-sm mb-4">{shareError}</p>}
+
       {shareUrl && (
         <div className="mb-4 bg-indigo-50 border border-indigo-200 rounded-xl p-3 flex items-center gap-2 text-sm">
           <input readOnly value={shareUrl} className="flex-1 bg-white border border-indigo-200 rounded-lg px-2 py-1" />
-          <button onClick={() => navigator.clipboard.writeText(shareUrl)} className="text-indigo-700 font-medium hover:underline">Copy</button>
+          <button onClick={copyShareUrl} className="text-indigo-700 font-medium hover:underline w-16 text-right">
+            {copied ? 'Copied ✓' : 'Copy'}
+          </button>
           <button onClick={() => setShareUrl(null)} className="text-slate-400 hover:text-slate-700">✕</button>
         </div>
       )}
+
+      <ConnectionBanner status={status} />
 
       <div className="flex gap-4 items-start">
         <div className="flex-1 min-w-0">

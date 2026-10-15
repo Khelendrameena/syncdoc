@@ -7,6 +7,7 @@ import { CollaborationCursor } from '@tiptap/extension-collaboration-cursor';
 import { api } from '../api.js';
 import { colorFor } from '../lib.js';
 import { useCollabDoc } from '../collab.js';
+import { StatusPill, ConnectionBanner } from '../components.jsx';
 
 // Guest entry via share link: pick a display name, get a doc-scoped token,
 // then it's the same collaborative editor as owners get.
@@ -85,22 +86,33 @@ function GuestEditor({ session }) {
   );
 
   if (joinError) {
-    return <div className="p-8 text-red-700">Couldn’t open document: {joinError}</div>;
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center px-4">
+        <div className="bg-white border border-red-200 rounded-xl p-6 w-full max-w-sm text-center">
+          <p className="text-red-700 font-medium">Couldn’t open document: {joinError}</p>
+          <p className="text-sm text-slate-500 mt-2">The link may have expired or been revoked.</p>
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="min-h-screen bg-slate-100">
       <header className="bg-white border-b border-slate-200">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between flex-wrap gap-2">
           <span className="font-bold text-lg text-indigo-700">SyncDoc</span>
-          <span className="text-sm text-slate-500">
-            Editing as <b>{session.user.name}</b> (guest) · {status} ·
-            {' '}{collaborators.length} other{collaborators.length === 1 ? '' : 's'} here
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-slate-500">
+              Editing as <b>{session.user.name}</b> (guest) ·{' '}
+              {collaborators.length} other{collaborators.length === 1 ? '' : 's'} here
+            </span>
+            <StatusPill status={status} />
+          </div>
         </div>
       </header>
       <main className="max-w-6xl mx-auto px-4 py-6">
         <h1 className="text-xl font-bold text-slate-800 mb-4">{session.title}</h1>
+        <ConnectionBanner status={status} />
         <EditorContent editor={editor} />
       </main>
     </div>

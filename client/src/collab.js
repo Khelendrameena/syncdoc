@@ -61,11 +61,16 @@ export function useCollabDoc({ docId, token, user }) {
     const applyRemote = (b64) => Y.applyUpdate(ydoc, b64ToU8(b64), REMOTE);
 
     // Local edits -> send now, or buffer while offline for the reconnect flush.
+    // The server acks every update ({ version } or { error }); a rejection
+    // (malformed payload, too large) is logged so it isn't silent.
+    const updateAck = (res) => {
+      if (res?.error) console.warn('[syncdoc] server rejected update:', res.error);
+    };
     const onDocUpdate = (update, origin) => {
       if (origin === REMOTE || disposed) return;
       const enc = u8ToB64(update);
       if (joined && socket.connected) {
-        socket.emit('doc:update', { docId, update: enc });
+        socket.emit('doc:update', { docId, update: enc }, updateAck);
       } else {
         offlineBuffer.push(enc);
       }
@@ -105,7 +110,7 @@ export function useCollabDoc({ docId, token, user }) {
           joined = true;
           // Flush offline edits. Idempotent server-side (Yjs dedupes by
           // clientID+clock), so overlap with in-flight sends is safe.
-          for (const u of offlineBuffer) socket.emit('doc:update', { docId, update: u });
+          for (const u of offlineBuffer) socket.emit('doc:update', { docId, update: u }, updateAck);
           offlineBuffer = [];
           // Announce presence now that the server knows us.
           awareness.setLocalStateField('user', { name: user.name, color: user.color });
