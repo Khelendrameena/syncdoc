@@ -65,20 +65,37 @@ docker compose up --build
 # open http://localhost:8080
 ```
 
-**Option B — local dev (needs Postgres 16 + Node 20):**
+**Option B — local dev, no Docker (needs Postgres 16 + Node 20+):**
 
 ```bash
-createdb syncdoc
+# 1. Create the Postgres role + database (one-time):
+sudo -u postgres psql -c "CREATE USER syncdoc WITH PASSWORD 'syncdoc' CREATEDB;"
+sudo -u postgres psql -c "CREATE DATABASE syncdoc OWNER syncdoc;"
+
+# 2. Configure:
 cp .env.example .env
-# .env: DATABASE_URL=postgres://<user>:<pass>@localhost:5432/syncdoc
+# edit .env: set JWT_SECRET (generate one with: openssl rand -hex 32)
+
+# 3. Install and run (two terminals):
 npm install
-npm run dev:server   # :4000 (terminal 1)
-npm run dev:client   # :5173 (terminal 2)
+npm run dev:server   # terminal 1 → http://localhost:4000
+npm run dev:client   # terminal 2 → http://localhost:5173 (proxied to the server)
+# open http://localhost:5173
 ```
 
 Register an account, create a document, open it in two browser windows
 (or an incognito window) and type in both — cursors appear live. Use
 *Share* to invite a guest via link.
+
+**Smoke test** (no browser needed — exercises the real wire protocol:
+register/login → create doc → 2 socket clients → concurrent edits →
+presence):
+
+```bash
+# server must be running (Option A or B), then:
+node server/scripts/smoke-e2e.mjs --url http://localhost:4000
+# expect: 11/11 checks ok, "SMOKE PASS"
+```
 
 ## Configuration
 
@@ -123,19 +140,19 @@ makes K random insert/delete edits concurrently. Measured: per-client join
 latency (join → init ack), server updates received / wall time, and
 time-to-converge (last edit → all clients' text identical).
 
-**Results** (measured 2026-10-15, build machine, real PostgreSQL 16, server +
-clients on the same host over loopback — no network RTT, so treat latency
-as a ceiling):
+**Results** (re-measured 2026-10-15, build machine, real PostgreSQL 16,
+server + clients on the same host over loopback — no network RTT, so treat
+latency as a ceiling):
 
 | Clients | Edits/client | Join p50/p95 | Server edits/s* | Time to converge |
 |---|---|---|---|---|
-| 30 | 40 (1,200 total) | 3 / 8 ms | 511/s | 123 ms |
-| 50 | 40 (2,000 total) | 2 / 7 ms | 409/s | 157 ms |
+| 30 | 40 (1,200 total) | 3 / 12 ms | 627/s | 117 ms |
+| 50 | 40 (2,000 total) | 7 / 21 ms | 350/s | 174 ms |
 
 \* The edit loop paces clients with a 0–4 ms sleep between edits, so
 edits/s reflects client pacing, not the server ceiling. Every edit was
-received by the server and every replica converged (final docs: 6,184 and
-10,308 chars). Reproduce on your own hardware with:
+received by the server and every replica converged (final docs: 6,191 and
+10,311 chars). Reproduce on your own hardware with:
 
 ```bash
 docker compose up --build -d          # or your local Postgres
@@ -177,10 +194,13 @@ server/src/
                   rollback, presence heartbeats, idle eviction
   socket.js       Socket.IO protocol (join/diff, fan-out, awareness relay)
   routes/http.js  REST: auth, documents, sharing, snapshots, rollback
-  scripts/load-test.js
+server/scripts/
+  load-test.js    N-client convergence/throughput benchmark (real Postgres)
+  smoke-e2e.mjs  no-browser end-to-end smoke test (11 protocol checks)
 server/tests/     convergence, ordering, reconnect, presence, snapshots, auth
 client/src/
   collab.js       the sync engine: Y.Doc + socket + awareness wiring
+  components.jsx  StatusPill, ConnectionBanner (shared UI)
   pages/          Login, Dashboard, EditorPage (TipTap), ShareJoin
   lib.js          deterministic colors, chunked base64
 docs/             protocol.md, ot-vs-crdt.md
