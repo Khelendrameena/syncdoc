@@ -20,6 +20,7 @@ import {
   encodeAwarenessUpdate,
 } from 'y-protocols/awareness';
 import { u8ToB64, b64ToU8 } from './lib.js';
+import { getApiBase } from './api.js';
 
 function createSession() {
   const ydoc = new Y.Doc();
@@ -54,9 +55,8 @@ export function useCollabDoc({ docId, token, user }) {
 
     awareness.setLocalStateField('user', { name: user.name, color: user.color });
 
-    // Same-origin: works behind the nginx proxy in docker-compose and
-    // behind the Vite dev proxy.
-    const socket = io({ auth: { token }, reconnection: true, reconnectionDelay: 800 });
+    // Backend URL from env (Render in prod), same-origin in dev via Vite proxy.
+    const socket = io(getApiBase() || undefined, { auth: { token }, reconnection: true, reconnectionDelay: 800 });
 
     const applyRemote = (b64) => Y.applyUpdate(ydoc, b64ToU8(b64), REMOTE);
 
