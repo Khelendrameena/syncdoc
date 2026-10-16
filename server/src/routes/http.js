@@ -73,6 +73,16 @@ export function documentRoutes(store, rooms) {
     next();
   };
 
+  // Loads the document for any authenticated user (owner). Used for comments
+  // where collaborators should also participate. Guest share-link access is
+  // handled by the socket layer; REST comments require a logged-in user.
+  const docAccess = async (req, res, next) => {
+    const doc = await store.getDocument(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'document not found' });
+    req.doc = doc;
+    next();
+  };
+
   r.get('/', async (req, res) => {
     if (req.user.role === 'guest') return res.json({ documents: [] });
     res.json({ documents: await store.listDocuments(req.user.sub) });
@@ -135,11 +145,11 @@ export function documentRoutes(store, rooms) {
   // Comments: any collaborator with access can read/add; only the author
   // (or doc owner) can resolve/delete. For shared-link guests, req.user may
   // be minimal — allow if they have doc access.
-  r.get('/:id/comments', async (req, res) => {
+  r.get('/:id/comments', docAccess, async (req, res) => {
     res.json({ comments: await store.listComments(req.doc.id) });
   });
 
-  r.post('/:id/comments', async (req, res) => {
+  r.post('/:id/comments', docAccess, async (req, res) => {
     const { text, anchor } = req.body || {};
     if (!text || !text.trim()) return res.status(400).json({ error: 'text required' });
     const c = await store.addComment(
