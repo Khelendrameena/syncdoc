@@ -12,10 +12,13 @@ export default function Dashboard() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [query, setQuery] = useState('');
+  const [showTemplates, setShowTemplates] = useState(false);
 
-  const load = async () => {
+  const load = async (q = '') => {
     try {
-      const { documents } = await api('/api/documents', { token });
+      const path = q ? `/api/documents?q=${encodeURIComponent(q)}` : '/api/documents';
+      const { documents } = await api(path, { token });
       setDocs(documents);
     } catch (err) {
       setError(err.message);
@@ -24,6 +27,15 @@ export default function Dashboard() {
     }
   };
   useEffect(() => { load(); }, []);
+
+  // Debounced search
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setLoading(true);
+      load(query);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [query]);
 
   const create = async (e) => {
     e.preventDefault();
@@ -34,6 +46,30 @@ export default function Dashboard() {
       const { document } = await api('/api/documents', { method: 'POST', token, body: { title: title.trim() } });
       setTitle('');
       setDocs((d) => [document, ...d]);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const TEMPLATES = [
+    { name: 'Meeting Notes', content: '# Meeting Notes\n\n**Date:** \n**Attendees:** \n\n## Agenda\n\n- \n\n## Action Items\n\n- [ ] ' },
+    { name: 'Project Plan', content: '# Project Plan\n\n## Goals\n\n\n## Milestones\n\n| Milestone | Date | Owner |\n|---|---|---|\n|  |  |  |\n\n## Risks\n\n- ' },
+    { name: 'Blog Draft', content: '# \n\n> Hook: one sentence that grabs attention.\n\n## \n\n\n## Takeaway\n\n' },
+    { name: 'Blank', content: '' },
+  ];
+
+  const createFromTemplate = async (tpl) => {
+    if (creating) return;
+    setCreating(true); setError(null);
+    try {
+      const { document } = await api('/api/documents', { method: 'POST', token, body: { title: tpl.name } });
+      // Store template content to inject on first editor open via localStorage
+      localStorage.setItem(`syncdoc_tpl_${document.id}`, tpl.content);
+      setDocs((d) => [document, ...d]);
+      setShowTemplates(false);
+      setTitle('');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -78,13 +114,36 @@ export default function Dashboard() {
         <h1 className="text-2xl font-bold text-slate-800">Your documents</h1>
       </div>
 
-      <form onSubmit={create} className="flex gap-2 mb-6">
-        <input className="flex-1 border border-slate-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200"
-          placeholder="New document title…" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} />
-        <button disabled={creating} className="bg-indigo-600 text-white rounded-lg px-4 py-2 font-medium hover:bg-indigo-700 disabled:opacity-50">
-          {creating ? 'Creating…' : 'New document'}
-        </button>
-      </form>
+      <div className="flex flex-col sm:flex-row gap-2 mb-6">
+        <form onSubmit={create} className="flex gap-2 flex-1">
+          <input className="flex-1 min-w-0 border border-slate-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            placeholder="New document title…" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} />
+          <button disabled={creating} className="bg-indigo-600 text-white rounded-lg px-4 py-2 font-medium hover:bg-indigo-700 disabled:opacity-50 whitespace-nowrap">
+            {creating ? 'Creating…' : 'New'}
+          </button>
+        </form>
+        <div className="flex gap-2">
+          <input value={query} onChange={(e) => setQuery(e.target.value)}
+            placeholder="🔍 Search documents…"
+            className="flex-1 sm:w-48 border border-slate-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200" />
+          <button onClick={() => setShowTemplates((v) => !v)}
+            className="border border-slate-300 bg-white rounded-lg px-3 py-2 text-sm hover:border-indigo-400 whitespace-nowrap">
+            📋 Templates
+          </button>
+        </div>
+      </div>
+
+      {showTemplates && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          {TEMPLATES.map((t) => (
+            <button key={t.name} onClick={() => createFromTemplate(t)} disabled={creating}
+              className="bg-white border border-slate-200 rounded-xl p-4 text-left hover:border-indigo-400 hover:shadow-sm transition disabled:opacity-50">
+              <div className="font-medium text-slate-800 text-sm">{t.name}</div>
+              <div className="text-xs text-slate-400 mt-1">Start from template</div>
+            </button>
+          ))}
+        </div>
+      )}
 
       {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
 
@@ -100,7 +159,7 @@ export default function Dashboard() {
       ) : (
       <div className="grid gap-3">
         {docs.map((d) => (
-          <div key={d.id} className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex items-center justify-between hover:border-indigo-200 hover:shadow-sm transition">
+          <div key={d.id} className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:border-indigo-200 hover:shadow-sm transition">
             <Link to={`/doc/${d.id}`} className="font-medium text-slate-800 hover:text-indigo-700 min-w-0 truncate mr-3">
               {d.title}
             </Link>

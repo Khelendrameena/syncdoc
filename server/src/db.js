@@ -114,6 +114,15 @@ export function createStore(pool) {
       );
       return rows;
     },
+    async searchDocuments(ownerId, query) {
+      const { rows } = await pool.query(
+        `SELECT * FROM documents
+         WHERE owner_id = $1 AND title ILIKE $2
+         ORDER BY updated_at DESC LIMIT 20`,
+        [ownerId, `%${query}%`]
+      );
+      return rows;
+    },
     async getDocument(id) {
       const { rows } = await pool.query('SELECT * FROM documents WHERE id = $1', [id]);
       return rows[0] || null;

@@ -85,7 +85,12 @@ export function documentRoutes(store, rooms) {
 
   r.get('/', async (req, res) => {
     if (req.user.role === 'guest') return res.json({ documents: [] });
-    res.json({ documents: await store.listDocuments(req.user.sub) });
+    const q = (req.query.q || '').trim();
+    if (q) {
+      res.json({ documents: await store.searchDocuments(req.user.sub, q.slice(0, 100)) });
+    } else {
+      res.json({ documents: await store.listDocuments(req.user.sub) });
+    }
   });
 
   r.post('/', async (req, res) => {

@@ -39,6 +39,16 @@ function PresenceAvatars({ collaborators }) {
   );
 }
 
+// Render @mentions with highlight
+function renderWithMentions(text) {
+  const parts = text.split(/(@[\w.]+)/g);
+  return parts.map((part, i) =>
+    part.startsWith('@') && part.length > 1
+      ? <span key={i} className="bg-indigo-100 text-indigo-700 rounded px-1 font-medium">{part}</span>
+      : <span key={i}>{part}</span>
+  );
+}
+
 function CommentsPanel({ docId, token, onClose, socket }) {
   const [comments, setComments] = useState([]);
   const [text, setText] = useState('');
@@ -108,7 +118,7 @@ function CommentsPanel({ docId, token, onClose, socket }) {
   const done = comments.filter((c) => c.resolved);
 
   return (
-    <div className="w-80 shrink-0 bg-white border border-slate-200 rounded-xl p-4 h-fit max-h-[80vh] overflow-y-auto">
+    <div className="w-full lg:w-80 shrink-0 bg-white border border-slate-200 rounded-xl p-4 h-fit max-h-[80vh] overflow-y-auto">
       <div className="flex items-center justify-between mb-3">
         <h2 className="font-bold">Comments ({open.length})</h2>
         <button onClick={onClose} className="text-slate-400 hover:text-slate-700">✕</button>
@@ -134,7 +144,7 @@ function CommentsPanel({ docId, token, onClose, socket }) {
                 <button onClick={() => remove(c)} className="text-red-500 hover:underline text-xs">Delete</button>
               </div>
             </div>
-            <p className="text-slate-700 mt-1 whitespace-pre-wrap">{c.text}</p>
+            <p className="text-slate-700 mt-1 whitespace-pre-wrap">{renderWithMentions(c.text)}</p>
             <p className="text-xs text-slate-400 mt-1">{new Date(c.created_at).toLocaleString()}</p>
           </div>
         ))}
@@ -149,7 +159,7 @@ function CommentsPanel({ docId, token, onClose, socket }) {
                     <span className="font-medium">{c.user_name}</span>
                     <button onClick={() => toggleResolve(c)} className="text-indigo-600 hover:underline text-xs">Reopen</button>
                   </div>
-                  <p className="text-slate-600 mt-1">{c.text}</p>
+                  <p className="text-slate-600 mt-1">{renderWithMentions(c.text)}</p>
                 </div>
               ))}
             </div>
@@ -207,7 +217,7 @@ function HistoryPanel({ docId, token, onClose }) {
   };
 
   return (
-    <div className="w-80 shrink-0 bg-white border border-slate-200 rounded-xl p-4 h-fit max-h-[80vh] overflow-y-auto">
+    <div className="w-full lg:w-80 shrink-0 bg-white border border-slate-200 rounded-xl p-4 h-fit max-h-[80vh] overflow-y-auto">
       <div className="flex items-center justify-between mb-3">
         <h2 className="font-bold">Version history</h2>
         <button onClick={onClose} className="text-slate-400 hover:text-slate-700">✕</button>
@@ -253,12 +263,27 @@ export default function EditorPage() {
   const [shareUrl, setShareUrl] = useState(null);
 
   const { ydoc, awareness, status, collaborators, joinError, socket } = useCollabDoc({ docId, token, user });
+  const [wordCount, setWordCount] = useState(0);
 
   useEffect(() => {
     api(`/api/documents/${docId}`, { token })
       .then(({ document }) => setTitle(document.title))
       .catch(() => setTitle('Untitled'));
   }, [docId, token]);
+
+  // Template injection: if Dashboard stored template markdown, insert it once the editor is ready
+  const tplKey = `syncdoc_tpl_${docId}`;
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    const tpl = localStorage.getItem(tplKey);
+    if (!tpl) return;
+    localStorage.removeItem(tplKey);
+    // Only inject into an empty document
+    if (editor.isEmpty && tpl.trim()) {
+      // Insert as plain text; user can format with the toolbar
+      editor.commands.setContent(tpl.trim().split('\n\n').map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`).join(''), false);
+    }
+  }, [editor, tplKey]);
 
   // Share-link copy feedback ("Copied ✓") that resets after 2s.
   const [copied, setCopied] = useState(false);
@@ -290,6 +315,19 @@ export default function EditorPage() {
     },
     [ydoc, awareness] // recreate on rollback (new Y.Doc session)
   );
+
+  // Live word count
+  useEffect(() => {
+    if (!editor) return;
+    const update = () => {
+      const text = editor.getText() || '';
+      const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+      setWordCount(words);
+    };
+    update();
+    editor.on('update', update);
+    return () => { editor.off('update', update); };
+  }, [editor]);
 
 
   const makeShareLink = async () => {
@@ -356,10 +394,13 @@ export default function EditorPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <h1 className="text-xl font-bold text-slate-800">{title || 'Loading…'}</h1>
-        <div className="flex items-center gap-3">
+        <h1 className="text-lg sm:text-xl font-bold text-slate-800 truncate max-w-full">{title || 'Loading…'}</h1>
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           <StatusPill status={status} />
           <PresenceAvatars collaborators={collaborators} />
+          <span className="text-xs text-slate-400 hidden md:inline" title="Word count">
+            {wordCount} words · ~{Math.max(1, Math.ceil(wordCount / 200))} min read
+          </span>
           <button onClick={makeShareLink} className="text-sm bg-white border border-slate-300 rounded-lg px-3 py-1.5 hover:border-indigo-400">Share</button>
           <button onClick={() => setShowHistory((s) => !s)} className="text-sm bg-white border border-slate-300 rounded-lg px-3 py-1.5 hover:border-indigo-400">
             History
@@ -387,10 +428,9 @@ export default function EditorPage() {
 
       <ConnectionBanner status={status} />
 
-      <div className="flex gap-4 items-start">
-        <div className="flex-1 min-w-0">
+      <div className="flex flex-col lg:flex-row gap-4 items-start">
+        <div className="flex-1 min-w-0 w-full">
           <EditorContent editor={editor} />
-        </div>
         {showHistory && <HistoryPanel docId={docId} token={token} onClose={() => setShowHistory(false)} />}
         {showComments && <CommentsPanel docId={docId} token={token} socket={socket} onClose={() => setShowComments(false)} />}
       </div>
