@@ -431,6 +431,7 @@ export default function EditorPage() {
       <div className="flex flex-col lg:flex-row gap-4 items-start">
         <div className="flex-1 min-w-0 w-full">
           <EditorContent editor={editor} />
+        </div>
         {showHistory && <HistoryPanel docId={docId} token={token} onClose={() => setShowHistory(false)} />}
         {showComments && <CommentsPanel docId={docId} token={token} socket={socket} onClose={() => setShowComments(false)} />}
       </div>
