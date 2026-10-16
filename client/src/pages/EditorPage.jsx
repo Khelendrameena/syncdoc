@@ -147,7 +147,7 @@ export default function EditorPage() {
       extensions: [
         // History MUST be off: Yjs is the source of truth for undoable state.
         StarterKit.configure({ history: false }),
-        Collaboration.configure({ document: ydoc.getXmlFragment('doc') }),
+        Collaboration.configure({ document: ydoc }),
         CollaborationCursor.configure({
           provider: { awareness }, // the extension only reads provider.awareness
           user: { name: user.name, color: user.color },

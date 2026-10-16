@@ -74,7 +74,7 @@ function GuestEditor({ session }) {
     {
       extensions: [
         StarterKit.configure({ history: false }),
-        Collaboration.configure({ document: ydoc.getXmlFragment('doc') }),
+        Collaboration.configure({ document: ydoc }),
         CollaborationCursor.configure({
           provider: { awareness },
           user: { name: session.user.name, color: session.user.color },
