@@ -34,6 +34,7 @@ export function useCollabDoc({ docId, token, user }) {
   const [status, setStatus] = useState('connecting'); // connecting|syncing|online|offline|error
   const [collaborators, setCollaborators] = useState([]);
   const [joinError, setJoinError] = useState(null);
+  const socketRef = useRef(null);
   const sessionRef = useRef(session);
   sessionRef.current = session;
 
@@ -57,6 +58,7 @@ export function useCollabDoc({ docId, token, user }) {
 
     // Backend URL from env (Render in prod), same-origin in dev via Vite proxy.
     const socket = io(getApiBase() || undefined, { auth: { token }, reconnection: true, reconnectionDelay: 800 });
+    socketRef.current = socket;
 
     const applyRemote = (b64) => Y.applyUpdate(ydoc, b64ToU8(b64), REMOTE);
 
@@ -147,5 +149,5 @@ export function useCollabDoc({ docId, token, user }) {
     // Re-runs when `session` is replaced (rollback) or docId/token change.
   }, [docId, token, session, user.name, user.color, refreshCollaborators]);
 
-  return { ydoc: session.ydoc, awareness: session.awareness, status, collaborators, joinError };
+  return { ydoc: session.ydoc, awareness: session.awareness, status, collaborators, joinError, socket: socketRef.current };
 }

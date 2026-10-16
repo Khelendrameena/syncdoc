@@ -188,6 +188,10 @@ export class RoomManager {
   // history surgery:
   //   1. flush + auto-snapshot the current state (nothing is ever lost),
   //   2. swap the room's Y.Doc for one built from the snapshot,
+  broadcast(docId, event, payload) {
+    this.io.to(`doc:${docId}`).emit(event, payload);
+  }
+
   //   3. persist the restored state, bump version, broadcast doc:reset.
   // Clients replace their local doc wholesale. Documented in README.
   async rollback(docId, snapshotId, userId) {

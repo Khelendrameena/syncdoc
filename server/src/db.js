@@ -59,6 +59,18 @@ CREATE TABLE IF NOT EXISTS document_shares (
   token TEXT UNIQUE NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS document_comments (
+  id TEXT PRIMARY KEY,
+  document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_name TEXT NOT NULL,
+  text TEXT NOT NULL,
+  anchor TEXT,
+  resolved BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_comments_doc ON document_comments(document_id, created_at);
 `;
 
 export function createStore(pool) {
@@ -158,6 +170,37 @@ export function createStore(pool) {
       );
       return rows[0];
     },
+    async listComments(documentId) {
+      const { rows } = await pool.query(
+        `SELECT id, user_id, user_name, text, anchor, resolved, created_at
+         FROM document_comments WHERE document_id = $1 ORDER BY created_at ASC`,
+        [documentId]
+      );
+      return rows;
+    },
+
+    async addComment(documentId, userId, userName, text, anchor) {
+      const id = randomUUID();
+      const { rows } = await pool.query(
+        `INSERT INTO document_comments (id, document_id, user_id, user_name, text, anchor)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [id, documentId, userId, userName, text, anchor || null]
+      );
+      return rows[0];
+    },
+
+    async resolveComment(commentId, resolved) {
+      const { rows } = await pool.query(
+        `UPDATE document_comments SET resolved = $2 WHERE id = $1 RETURNING *`,
+        [commentId, !!resolved]
+      );
+      return rows[0] || null;
+    },
+
+    async deleteComment(commentId) {
+      await pool.query(`DELETE FROM document_comments WHERE id = $1`, [commentId]);
+    },
+
     async listSnapshots(documentId) {
       const { rows } = await pool.query(
         `SELECT s.id, s.version, s.note, s.created_at,

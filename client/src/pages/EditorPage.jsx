@@ -39,6 +39,127 @@ function PresenceAvatars({ collaborators }) {
   );
 }
 
+function CommentsPanel({ docId, token, onClose, socket }) {
+  const [comments, setComments] = useState([]);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const load = async () => {
+    try {
+      const { comments } = await api(`/api/documents/${docId}/comments`, { token });
+      setComments(comments);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  useEffect(() => { load(); }, [docId]);
+
+  // Real-time updates
+  useEffect(() => {
+    if (!socket) return;
+    const onNew = ({ comment }) => setComments((cs) => [...cs, comment]);
+    const onUpdated = ({ comment }) => setComments((cs) => cs.map((c) => c.id === comment.id ? comment : c));
+    const onDeleted = ({ id }) => setComments((cs) => cs.filter((c) => c.id !== id));
+    socket.on('comment:new', onNew);
+    socket.on('comment:updated', onUpdated);
+    socket.on('comment:deleted', onDeleted);
+    return () => {
+      socket.off('comment:new', onNew);
+      socket.off('comment:updated', onUpdated);
+      socket.off('comment:deleted', onDeleted);
+    };
+  }, [socket]);
+
+  const add = async () => {
+    if (!text.trim()) return;
+    setBusy(true); setError(null);
+    try {
+      await api(`/api/documents/${docId}/comments`, { method: 'POST', token, body: { text: text.trim() } });
+      setText('');
+      // real-time event will add it; fallback reload
+      setTimeout(load, 500);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleResolve = async (c) => {
+    try {
+      await api(`/api/documents/${docId}/comments/${c.id}/resolve`, { method: 'POST', token, body: { resolved: !c.resolved } });
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const remove = async (c) => {
+    if (!confirm('Delete this comment?')) return;
+    try {
+      await api(`/api/documents/${docId}/comments/${c.id}`, { method: 'DELETE', token });
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const open = comments.filter((c) => !c.resolved);
+  const done = comments.filter((c) => c.resolved);
+
+  return (
+    <div className="w-80 shrink-0 bg-white border border-slate-200 rounded-xl p-4 h-fit max-h-[80vh] overflow-y-auto">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="font-bold">Comments ({open.length})</h2>
+        <button onClick={onClose} className="text-slate-400 hover:text-slate-700">✕</button>
+      </div>
+      <div className="flex gap-2 mb-4">
+        <input value={text} onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && add()}
+          placeholder="Add a comment…"
+          className="flex-1 border border-slate-300 rounded-lg px-2 py-1 text-sm" />
+        <button onClick={add} disabled={busy || !text.trim()}
+          className="bg-indigo-600 text-white rounded-lg px-3 py-1 text-sm hover:bg-indigo-700 disabled:opacity-50">
+          Post
+        </button>
+      </div>
+      {error && <p className="text-red-600 text-sm mb-2">{error}</p>}
+      <div className="space-y-2">
+        {open.map((c) => (
+          <div key={c.id} className="border border-slate-200 rounded-lg p-2.5 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-slate-800">{c.user_name}</span>
+              <div className="flex gap-2">
+                <button onClick={() => toggleResolve(c)} className="text-green-600 hover:underline text-xs">Resolve</button>
+                <button onClick={() => remove(c)} className="text-red-500 hover:underline text-xs">Delete</button>
+              </div>
+            </div>
+            <p className="text-slate-700 mt-1 whitespace-pre-wrap">{c.text}</p>
+            <p className="text-xs text-slate-400 mt-1">{new Date(c.created_at).toLocaleString()}</p>
+          </div>
+        ))}
+        {open.length === 0 && <p className="text-sm text-slate-500 py-4 text-center">No open comments.</p>}
+        {done.length > 0 && (
+          <details className="mt-2">
+            <summary className="text-xs text-slate-500 cursor-pointer">Resolved ({done.length})</summary>
+            <div className="space-y-2 mt-2">
+              {done.map((c) => (
+                <div key={c.id} className="border border-slate-100 rounded-lg p-2.5 text-sm opacity-60">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">{c.user_name}</span>
+                    <button onClick={() => toggleResolve(c)} className="text-indigo-600 hover:underline text-xs">Reopen</button>
+                  </div>
+                  <p className="text-slate-600 mt-1">{c.text}</p>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function HistoryPanel({ docId, token, onClose }) {
   const [snaps, setSnaps] = useState([]);
   const [note, setNote] = useState('');
@@ -128,9 +249,10 @@ export default function EditorPage() {
   const { token, user } = useAuth();
   const [title, setTitle] = useState('');
   const [showHistory, setShowHistory] = useState(false);
+  const [showComments, setShowComments] = useState(false);
   const [shareUrl, setShareUrl] = useState(null);
 
-  const { ydoc, awareness, status, collaborators, joinError } = useCollabDoc({ docId, token, user });
+  const { ydoc, awareness, status, collaborators, joinError, socket } = useCollabDoc({ docId, token, user });
 
   useEffect(() => {
     api(`/api/documents/${docId}`, { token })
@@ -181,6 +303,37 @@ export default function EditorPage() {
     }
   };
 
+  const exportMarkdown = () => {
+    if (!editor) return;
+    const html = editor.getHTML();
+    // Basic HTML -> Markdown conversion
+    let md = html
+      .replace(/<h1[^>]*>(.*?)<\/h1>/gi, '# $1\n\n')
+      .replace(/<h2[^>]*>(.*?)<\/h2>/gi, '## $1\n\n')
+      .replace(/<h3[^>]*>(.*?)<\/h3>/gi, '### $1\n\n')
+      .replace(/<strong[^>]*>(.*?)<\/strong>/gi, '**$1**')
+      .replace(/<b[^>]*>(.*?)<\/b>/gi, '**$1**')
+      .replace(/<em[^>]*>(.*?)<\/em>/gi, '*$1*')
+      .replace(/<i[^>]*>(.*?)<\/i>/gi, '*$1*')
+      .replace(/<code[^>]*>(.*?)<\/code>/gi, '`$1`')
+      .replace(/<li[^>]*>(.*?)<\/li>/gi, '- $1\n')
+      .replace(/<ul[^>]*>/gi, '\n').replace(/<\/ul>/gi, '\n')
+      .replace(/<ol[^>]*>/gi, '\n').replace(/<\/ol>/gi, '\n')
+      .replace(/<p[^>]*>(.*?)<\/p>/gi, '$1\n\n')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    const blob = new Blob([`# ${title || 'Untitled'}\n\n` + md], { type: 'text/markdown' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${(title || 'document').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.md`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
   const copyShareUrl = async () => {
     try {
       await navigator.clipboard.writeText(shareUrl);
@@ -211,6 +364,12 @@ export default function EditorPage() {
           <button onClick={() => setShowHistory((s) => !s)} className="text-sm bg-white border border-slate-300 rounded-lg px-3 py-1.5 hover:border-indigo-400">
             History
           </button>
+          <button onClick={() => setShowComments((s) => !s)} className="text-sm bg-white border border-slate-300 rounded-lg px-3 py-1.5 hover:border-indigo-400">
+            Comments
+          </button>
+          <button onClick={exportMarkdown} className="text-sm bg-white border border-slate-300 rounded-lg px-3 py-1.5 hover:border-indigo-400">
+            Export ↓
+          </button>
         </div>
       </div>
 
@@ -233,6 +392,7 @@ export default function EditorPage() {
           <EditorContent editor={editor} />
         </div>
         {showHistory && <HistoryPanel docId={docId} token={token} onClose={() => setShowHistory(false)} />}
+        {showComments && <CommentsPanel docId={docId} token={token} socket={socket} onClose={() => setShowComments(false)} />}
       </div>
     </div>
   );

@@ -132,5 +132,38 @@ export function documentRoutes(store, rooms) {
     }
   });
 
+  // Comments: any collaborator with access can read/add; only the author
+  // (or doc owner) can resolve/delete. For shared-link guests, req.user may
+  // be minimal — allow if they have doc access.
+  r.get('/:id/comments', async (req, res) => {
+    res.json({ comments: await store.listComments(req.doc.id) });
+  });
+
+  r.post('/:id/comments', async (req, res) => {
+    const { text, anchor } = req.body || {};
+    if (!text || !text.trim()) return res.status(400).json({ error: 'text required' });
+    const c = await store.addComment(
+      req.doc.id, req.user.sub, req.user.name || 'anonymous',
+      text.trim().slice(0, 2000), (anchor || '').slice(0, 300)
+    );
+    // broadcast to collaborators in the room
+    try { rooms.broadcast(req.doc.id, 'comment:new', { comment: c }); } catch {}
+    res.status(201).json({ comment: c });
+  });
+
+  r.post('/:id/comments/:cid/resolve', ownerOnly, async (req, res) => {
+    const resolved = (req.body || {}).resolved !== false;
+    const c = await store.resolveComment(req.params.cid, resolved);
+    if (!c) return res.status(404).json({ error: 'not found' });
+    try { rooms.broadcast(req.doc.id, 'comment:updated', { comment: c }); } catch {}
+    res.json({ comment: c });
+  });
+
+  r.delete('/:id/comments/:cid', ownerOnly, async (req, res) => {
+    await store.deleteComment(req.params.cid);
+    try { rooms.broadcast(req.doc.id, 'comment:deleted', { id: req.params.cid }); } catch {}
+    res.json({ ok: true });
+  });
+
   return r;
 }
